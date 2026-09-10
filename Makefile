@@ -1,82 +1,26 @@
-# Makefile for ThuThesis
+TECTONIC ?= tectonic
+TECTONIC_FLAGS ?=
+PYTHON ?= python3
 
-PACKAGE = thuthesis
-THESIS  = thuthesis-example
+.DEFAULT_GOAL := thesis
+.PHONY: thesis view clean cleanall
 
-SOURCES = $(PACKAGE).ins $(PACKAGE).dtx
-CLSFILE = dtx-style.sty $(PACKAGE).cls
+# Tectonic fetches and caches missing packages and fonts automatically.
+build:
+	mkdir -p build
 
-LATEXMK = latexmk
-SHELL  := /usr/bin/env bash
+build/thuthesis.cls: thuthesis.ins thuthesis.dtx | build
+	$(TECTONIC) $(TECTONIC_FLAGS) --pass tex --keep-intermediates --outdir build thuthesis.ins
 
-# make deletion work on Windows
-ifdef SystemRoot
-	RM = del /Q
-else
-	RM = rm -f
-endif
+thesis: build/thuthesis.cls
+	$(PYTHON) scripts/tectonic.py build/tectonic.log $(TECTONIC) --color never $(TECTONIC_FLAGS) -Z search-path=build --keep-logs --synctex --outdir build thesis.tex
 
-.PHONY: all all-dev clean distclean dist thesis viewthesis doc viewdoc cls check save test FORCE_MAKE
+view: thesis
+	open build/thesis.pdf
 
-thesis: $(THESIS).pdf
-
-all: thesis
-
-all-dev: doc all
-
-cls: $(CLSFILE)
-
-$(CLSFILE): $(SOURCES)
-	xetex $(PACKAGE).ins
-
-doc: $(PACKAGE).pdf
-
-$(PACKAGE).pdf: cls FORCE_MAKE
-	$(LATEXMK) $(PACKAGE).dtx
-
-$(THESIS).pdf: cls FORCE_MAKE
-	$(LATEXMK) $(THESIS)
-
-viewdoc: doc
-	$(LATEXMK) -pv $(PACKAGE).dtx
-
-viewthesis: thesis
-	$(LATEXMK) -pv $(THESIS)
-
-save:
-ifeq ($(target),)
-	bash testfiles/save.sh
-else
-	bash testfiles/save.sh $(target)
-endif
-
-test:
-ifeq ($(target),)
-	l3build check
-else
-	bash testfiles/test.sh $(target)
-endif
-
+# Keep the PDF; only build/ contains generated files.
 clean:
-	$(LATEXMK) -c $(PACKAGE).dtx $(THESIS)
-	-@$(RM) -rf *~ main-survey.* main-translation.* _markdown_thuthesis* thuthesis.markdown.*
+	find build -type f ! -name thesis.pdf -delete 2>/dev/null || test ! -d build
 
-cleanall: clean
-	-@$(RM) $(PACKAGE).pdf $(THESIS).pdf
-
-distclean: cleanall
-	-@$(RM) $(CLSFILE)
-	-@$(RM) -r dist
-
-check: FORCE_MAKE
-ifeq ($(version),)
-	@echo "Error: version missing: \"make [check|dist] version=X.Y.Z\""; exit 1
-else
-	@[[ $(shell grep -E -c '$(version) Tsinghua University Thesis Template|\\def\\version\{$(version)\}' thuthesis.dtx) -eq 3 ]] || (echo "bump version with \"l3build tag\" before release"; exit 1)
-endif
-
-dist: check all-dev
-	# use l3build for CTAN release (zip with .tds.zip)
-	l3build ctan --config utils/build-ctan
-	# use gulp for GitHub release (zip with generated file)
-	python3 utils/create_release.py --version="v$(version)"
+cleanall:
+	rm -rf build
