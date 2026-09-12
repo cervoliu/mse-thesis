@@ -1,0 +1,275 @@
+\section{算子的形式语义}
+\label{sec:formal-semantics-of-operators}
+
+\subsection{数值语义}
+\label{subsec:numerical-semantics}
+
+算子的计算结果取决于所采用的数值语义。为明确后续定义及验证结论的适用范围，本节显式指定标量类型的值域和基本操作的解释，并将其统称为数值语义模型，记为 \(\mathcal M\)。
+
+\begin{definition}[标量类型与值域]
+\label{def:scalar-type-and-value-domain}
+设 \(\mathcal D\) 为标量类型集合。
+数值语义模型 \(\mathcal M\) 为每个标量类型 \(\tau\in\mathcal D\) 指定值域
+\[
+V_{\mathcal M}(\tau).
+\]
+
+类型为 \(\tau\) 的标量值是 \(V_{\mathcal M}(\tau)\) 中的元素。张量的所有标量元素具有相同类型，其元素值域由该类型和所采用的数值语义模型共同确定。
+
+标量类型与其解释后的值域是不同的对象。例如，在实数抽象下，不同浮点格式可以被解释到同一个实数值域，但这种解释不表示它们在实际执行中具有相同的表示范围和舍入行为。后文在类型和语义模型已经明确时，将值域简记为 \(V\)。
+\end{definition}
+
+\begin{definition}[标量原语的语义]
+设 \(\mathcal O\) 为标量原语集合。每个原语 \(o\in\mathcal O\) 具有类型签名
+\[
+o:\tau_1\times\cdots\times\tau_k\longrightarrow\tau.
+\]
+模型 \(\mathcal M\) 为其指定语义解释
+\[
+\llbracket o\rrbracket_{\mathcal M}:
+V_{\mathcal M}(\tau_1)\times\cdots\times V_{\mathcal M}(\tau_k)
+\rightharpoonup V_{\mathcal M}(\tau),
+\]
+\end{definition}
+
+其中 \(\rightharpoonup\) 表示偏函数。原语的定义域给出该操作有意义的输入范围。常量可以视为无输入的原语；算术运算、比较和类型转换均须具有明确的类型签名和语义解释。
+
+\begin{example}[实数解释下的除法原语语义]
+在实数解释下，除法原语的定义域为
+\[
+\operatorname{Dom}\bigl(\llbracket\mathrm{div}\rrbracket_{\mathcal M}\bigr)
+=\{(x,y)\in\mathbb R^2\mid y\ne0\},
+\]
+并在该定义域上满足
+\[
+\llbracket\mathrm{div}\rrbracket_{\mathcal M}(x,y)=x/y.
+\]
+\end{example}
+
+因此，后续证明某个算子在输入契约下有定义时，需要保证执行到的每个原语均接收其定义域内的参数。
+
+本文采用实数抽象解释浮点数值计算，并在该模型中要求结果精确相等。涉及整数运算时，其解释须另外明确；用于描述形状和逻辑坐标的自然数，不自动决定候选程序中固定位宽整数指令的语义。实数模型下的正确性结论不直接蕴含实际浮点执行的逐位相等或误差界。
+
+\subsection{张量}
+\label{subsec:tensors}
+
+张量是算子运算的核心对象，其本质是向量的高维推广。为了形式化地描述张量，需要先定义张量形状、维数、轴长与索引空间等结构。
+
+张量形状描述各维度的数量、顺序及长度。本文使用有限自然数列表表示形状。
+
+\begin{definition}[形状]
+\label{def:shape}
+张量形状是由自然数构成的有限列表，递归定义如下：
+\[
+s \mathrel{::=} \mathsf{nil} \mid n::s,
+\qquad n\in\mathbb N.
+\]其中，\(\mathsf{nil}\) 表示空列表，对应零阶（标量）形状；\(n::s\) 表示在列表 \(s\) 的头部加入 \(n\)，即在形状 \(s\) 的最外侧增加一个长度为 \(n\) 的维度。列表中的维度长度按从外到内的顺序排列。
+非空形状常用列表记法表示。例如，
+\[
+[2,3]=2::(3::\mathsf{nil})
+\]
+表示具有两行、三列的矩阵形状。
+形状相等要求列表长度相同，且对应位置的维度长度分别相等。
+\end{definition}
+
+\begin{definition}[形状的维数、轴长与索引空间]
+\label{def:rank-axis-length-and-index-space}
+对形状 \(s = [n_0,\ldots,n_{r-1}]\)，其维数 \(\operatorname{rank}(s) = r\) 为列表长度。轴从 \(0\) 开始编号，第 \(k\) 个轴的轴长为 \(n_k\)。
+索引空间 \(\mathcal I(s)\) 是满足各轴边界约束的自然数向量集合：
+\[
+\mathcal I(s) = \{[i_0,\ldots,i_{r-1}] \mid \forall k \in [0, r).\, i_k < n_k \land i_k \in \mathbb N\}.
+\]
+索引空间中的每个元素称为一个索引。
+\end{definition}
+
+形状中的轴长可以是常量，也可以是在输入契约约束下符号化的自然数变量。例如，\([M,N]\) 可以描述随 \(M,N\) 变化的一族矩阵形状。
+
+\begin{definition}[张量]
+\label{def:tensor}
+  给定元素值域 \(V\) 和形状 \(s\)，形状为 \(s\) 的张量
+  是从索引空间 \(\mathcal I(s)\) 到 \(V\) 的全函数：
+  \[
+    T:\mathcal I(s)\to V.
+  \]
+  所有这样的张量构成集合 \(\mathcal T_V(s)\)。
+  对索引 \(\boldsymbol i\in\mathcal I(s)\)，
+  记 \(T[\boldsymbol i]=T(\boldsymbol i)\)，
+  表示张量在该索引处的元素。
+\end{definition}
+
+相同形状和元素值域的两个张量相等，当且仅当它们在所有索引处的元素相等：
+\[
+  T=U
+  \quad\Longleftrightarrow\quad
+  \forall\boldsymbol i\in\mathcal I(s),\
+  T[\boldsymbol i]=U[\boldsymbol i],
+  \qquad T,U\in\mathcal T_V(s).
+\]
+
+零维张量通过唯一的空索引对应一个标量值。
+当 \(\mathcal I(s)=\varnothing\) 时，固定形状 \(s\) 上的张量为唯一的空函数，称为空张量。
+
+%张量描述完整的逻辑元素值。存储地址、步长及物理存储顺序由存储表示另行规定。
+
+\subsection{指称语义}
+\label{subsec:denotational-semantics}
+
+算子是构成模型计算的基本单元，其计算含义体现为输入与输出之间的数学关系。为形式化地描述这一关系，下面首先约定算子的逻辑输入与输出。
+
+考虑具有 \(m\) 个张量输入、若干标量参数和一个张量输出的算子。
+将其逻辑输入统一记为
+\[
+  x=(X_1,\ldots,X_m,\theta),
+\]
+其中，\(\theta\) 表示形状参数与标量参数组成的元组，
+各输入张量满足
+\[
+  X_j\in\mathcal T_{V_j}(s_j(\theta)),
+  \qquad j=1,\ldots,m.
+\]
+这里，\(V_j\) 为第 \(j\) 个输入的元素值域，
+\(s_j(\theta)\) 为其形状。
+参数元组 \(\theta\) 的具体组成由算子声明确定。
+
+约定输出张量的元素值域为 \(V_Y\)，形状为 \(s_Y(x)\)，则
+\[
+  Y\in\mathcal T_{V_Y}(s_Y(x)).
+\]
+输出形状可以依赖于输入；对于仅由形状参数和标量参数决定输出形状的算子，
+可将其简记为 \(s_Y(\theta)\)；当上下文明确时，简记为 \(s_Y\)。
+
+\begin{example}[矩阵乘法的逻辑输入与输出]
+    矩阵乘法的逻辑输入可以写为 \(x=(A,B,(M,N,K))\)，其中
+    \[
+      A\in\mathcal T_{\mathbb R}([M,K]),
+      \qquad
+      B\in\mathcal T_{\mathbb R}([K,N]),
+    \]
+    约定输出属于 \(\mathcal T_{\mathbb R}([M,N])\)。
+\end{example}
+
+\begin{definition}[输入契约与有效输入域]
+    设 \(\mathcal X\) 为满足算子输入声明的所有逻辑输入组成的集合。
+    输入契约是定义在 \(\mathcal X\) 上的谓词 \(P(x)\)，
+    用于约束形状参数、标量参数及张量元素的取值。
+    契约 \(P\) 所确定的有效输入域为
+    \[
+      \mathcal D_P=\{x\in\mathcal X\mid P(x)\}.
+    \]
+    若 \(\mathcal D_P\neq\varnothing\)，则称契约 \(P\) 可满足。
+\end{definition}
+
+\begin{example}[逐元素除法算子的输入契约]
+\label{ex:input-contract-for-elementwise-division}
+对于逐元素除法算子，输入张量
+\(A,B\in\mathcal T_{\mathbb R}(s)\)。
+在实数除法语义下，输入契约可以写为
+\[
+P(A,B)
+\iff
+\forall \boldsymbol i\in\mathcal I(s),\;
+B[\boldsymbol i]\neq 0.
+\]
+该契约保证每个输出元素所需的除法运算均有定义。
+\end{example}
+
+后续语义与等价性命题均在有效输入域 \(\mathcal D_P\) 上讨论。
+张量元素对所有满足契约的取值进行全称量化；
+形状参数和标量参数则在具体命题中明确固定或全称量化。
+%验证时应单独确认契约的可满足性，以避免有效输入域为空时等价性命题平凡成立。
+
+\begin{definition}[算子的指称语义]
+    给定语义模型 \(\mathcal M\) 和输入契约 \(P\)。
+    算子 \(R\) 的指称语义 \(\llbracket R\rrbracket_{\mathcal M}\) 定义为有效输入域上的函数：
+    \[
+      \llbracket R\rrbracket_{\mathcal M}: 
+      \mathcal D_P \to \mathcal T_{V_Y}(s_Y),
+    \]
+    其中，\(V_Y\) 为输出元素值域，\(s_Y\) 为输出张量形状。
+    因而，对每个输出索引
+    \(\boldsymbol i\in\mathcal I(s_Y)\)，
+    \[
+      \llbracket R\rrbracket_{\mathcal M}(x)[\boldsymbol i]
+    \]
+    表示算子在输入 \(x\) 下对应位置的输出值。
+\end{definition}
+  
+算子的指称语义须在有效输入域上处处有定义。
+当其定义使用部分运算时，应证明输入契约足以保证这些运算在求值过程中有定义。
+
+\begin{example}[矩阵乘法的指称语义]
+\label{ex:denotational-semantic-of-matrix-multiplication}
+在实数算术模型下，矩阵乘法的输入为
+\[
+  A\in\mathcal T_{\mathbb R}([M,K]),
+  \qquad
+  B\in\mathcal T_{\mathbb R}([K,N]),
+\]
+其中 \(M,N,K\in\mathbb N\)，输出形状为 \([M,N]\)。
+其指称语义由下式确定：
+\[
+  \llbracket \operatorname{matmul}\rrbracket_{\mathcal M}
+  (A,B,(M,N,K))[i,j]
+  =
+  \sum_{k=0}^{K-1} A[i,k]\,B[k,j],
+  \qquad [i,j]\in\mathcal I([M,N]).
+\]
+当 \(K=0\) 时，求和为空和，其值约定为 \(0\)。
+\end{example}
+
+\section{算子实现的执行语义}
+\label{sec:execution-semantics-of-implementations}
+
+\begin{definition}[张量的存储映射]
+    设 \(\mathcal A\) 为存储地址集合。
+    对形状为 \(s\) 的张量，其存储映射是函数
+    \[
+      \rho:\mathcal I(s)\to\mathcal A,
+    \]
+    其中，\(\rho(\boldsymbol i)\) 表示逻辑索引
+    \(\boldsymbol i\) 所对应的元素存储地址。
+\end{definition}
+
+在以元素为寻址单位的线性地址模型中，
+常见的存储映射由基址 \(b\) 和各轴的步长确定。
+对形状 \(s=[n_0,\ldots,n_{r-1}]\)，
+设步长为 \([\delta_0,\ldots,\delta_{r-1}]\)，则
+\[
+\rho([i_0,\ldots,i_{r-1}])
+=
+b+\sum_{k=0}^{r-1}i_k\delta_k.
+\]
+其中，\(\delta_k\) 表示第 \(k\) 个索引分量增加 \(1\)
+所对应的地址增量。
+
+注意这里不要求 \(\rho\) 为单射，以允许零步长视图等共享存储的表示。映射得到的地址是否已分配、是否允许读写，以及写入是否冲突，需要结合后续的存储状态与执行语义判断。
+
+\begin{definition}[存储状态]
+    设 \(\mathcal V\) 为语义模型中的存储值域，
+    不同元素类型的值在其中按类型区分。
+    存储状态是一个具有有限定义域的部分函数
+    \[
+      \mu:\mathcal A\rightharpoonup
+      \bigl(\mathcal V\sqcup\{\mathsf{undef}\}\bigr),
+    \]
+    其中，\(\operatorname{dom}(\mu)\) 为已分配的地址集合，
+    \(\mathsf{undef}\) 是区别于所有存储值的未初始化标记。
+    对已分配地址 \(a\)，若 \(\mu(a)=v\in\mathcal V\)，
+    则该地址已初始化且保存值 \(v\)；
+    若 \(\mu(a)=\mathsf{undef}\)，则该地址尚未初始化。
+\end{definition}
+
+对张量 \(T\in\mathcal T_V(s)\) 及其存储映射 \(\rho\)，
+称存储状态 \(\mu\) 通过 \(\rho\) 表示 \(T\)，记为
+\(\mu\models_\rho T\)，当且仅当
+\[
+  \rho(\mathcal I(s))\subseteq\operatorname{dom}(\mu)
+  \quad\land\quad
+  \forall\boldsymbol i\in\mathcal I(s),\;
+  \mu(\rho(\boldsymbol i))=T[\boldsymbol i].
+\]
+其中，张量元素按其类型嵌入存储值域 \(\mathcal V\)，
+等式中省略该嵌入记号。
+
+张量规定逻辑元素值，存储状态与存储映射共同给出这些值的存储表示。若两个索引映射到同一地址，存储状态也要求它们的元素值相等。
+输入存储应在执行开始时表示输入张量；输出区域则可以先处于未初始化状态，待执行结束后，再判断它是否表示指称语义规定的输出。读写权限与并发访问规则将在执行语义中另外规定。

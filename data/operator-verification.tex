@@ -1,0 +1,260 @@
+% !TEX root = ../thesis.tex
+
+\chapter{Triton 算子调用的等价性验证问题定义}
+\label{chap:operator-verification}
+
+\section{研究对象与验证边界}
+\label{sec:opv-scope}
+
+本章定义一次 Triton 算子调用的形式化验证问题，为验证案例的表达与验证工具的实现提供依据。
+研究对象是非原地、输入与输出不别名、仅产生一个逻辑输出张量的调用变体，
+且候选实现通过一次完整的 kernel launch 完成计算。
+该范围面向 ntops 等算子集合中满足上述条件的调用变体；
+具体实现是否满足限制，需要逐个检查，不能仅根据算子名称判定。
+
+验证单元包含一次 launch 中的全部 program instance，
+以及构造该调用所需的输入映射、存储布局、编译期参数和 launch grid 生成规则。
+单个 program、单条存储指令或一次符号执行路径均不是完整的验证单元。
+一个案例可以量化多个形状，从而描述一族调用；每个输入实例对应其中一次完整调用。
+
+第一阶段进一步要求各 program 只读取共同输入，独立完成计算，并写入互不重叠的输出区域。
+program 内部可以包含向量运算与归约；跨 program 通信、全局原子累加式协作归约、
+多次 launch 的组合、原地更新和额外辅助输出暂不属于本章的问题范围。
+其中，program 之间写入不重叠以及整个输出被完整产生，均为待验证性质，不能作为未经检查的假设。
+
+\section{算术模型与共同输入契约}
+\label{sec:opv-contract}
+
+\subsection{显式算术语义}
+
+记 $\mathcal{M}$ 为案例采用的语义模型。
+该模型明确规定数据运算、索引运算、类型转换及相关原语的含义。
+第一阶段将浮点计算解释为数学实数上的运算，并要求模型内的精确相等。
+涉及整数时，也必须明确所选整数语义；数学整数与具有固定位宽的整数不能隐式混用。
+本章的参数化定义不预先替所有整数操作选择同一种解释。
+
+实数抽象中的等价性不自动推出实际浮点执行的逐位相等或误差界。
+例如，加法在实数模型中满足结合律，而实际浮点加法可能因舍入而不满足结合律。
+因此，形式化结论应随所选模型一起报告；数值容差测试用于补充检查实际浮点行为。
+对未被模型定义的操作，不能任意替换其语义后仍宣称证明了原调用。
+
+\subsection{逻辑输入与契约}
+
+\begin{definition}[逻辑输入与输入契约]
+  逻辑输入 $x$ 包含形状、标量参数、输入张量的逻辑元素，
+  以及案例显式声明的存储与布局信息。
+  输入契约是这些量上的谓词 $P(x)$，对应的输入域为
+  \begin{equation}
+    \mathcal{D}_P = \{x \mid P(x)\}.
+    \label{eq:opv-domain}
+  \end{equation}
+  reference 与 candidate 共用该逻辑输入域。
+\end{definition}
+
+张量元素在契约允许的范围内全称量化。
+形状与标量参数可以由案例固定，也可以在显式约束下全称量化。
+例如，固定矩阵乘法的 $M=64$、$N=128$、$K=32$，
+仍然要求结论对所有满足契约的矩阵元素成立；具体形状不意味着只验证某个示例张量。
+符号形状案例则同时量化允许的形状和每种形状下允许的张量取值。
+
+\begin{definition}[案例有效性]
+  输入契约必须可满足，即
+  \begin{equation}
+    \exists x\; P(x),
+    \qquad\text{等价地，}\mathcal{D}_P\ne\varnothing.
+    \label{eq:opv-satisfiable}
+  \end{equation}
+\end{definition}
+
+契约可满足性独立于输出等价性检查。
+若同时要求 $K=30$ 与 $K\bmod32=0$，输入域为空，案例应被判为无效。
+不能利用蕴含式前件恒假而获得的真命题，报告有意义的验证成功。
+若尚不能确定契约可满足，也不能报告完整验证成功。
+
+\subsection{共同输入与双方调用映射}
+
+记 $b_R$ 与 $b_C$ 分别为 reference 和 candidate 的调用映射。
+两种映射使用同一个 $x$，构造各自需要的参数及存储表示。
+双方执行使用独立状态，输入的逻辑值一致。
+形状兼容性属于共同契约；指针、stride、编译期常量和 grid 等如何表示这些逻辑量，
+属于调用映射。映射必须保持约定的逻辑输入和输出接口。
+
+实现特有的前置要求不能作为某一侧的私有假设，隐式缩小共同输入域。
+若 candidate 要求谓词 $Q_C(x)$，应证明
+\begin{equation}
+  \forall x,\quad P(x)\Longrightarrow Q_C(x),
+  \label{eq:opv-requirement}
+\end{equation}
+或者显式建立契约包含 $Q_C$ 的受限案例。
+后一种处理改变了所证明的输入范围，必须在案例中可见。
+
+\section{参考函数与候选执行}
+\label{sec:opv-semantics}
+
+\subsection{参考输出函数}
+
+记 $\mathcal{I}_Y(x)$ 为约定输出张量的逻辑索引集合，
+$\mathcal{V}_{\mathcal{M}}$ 为所选模型中的元素值域。
+reference 经调用映射及语义解释后给出参考输出函数 $R_{\mathcal{M}}$。
+对每个 $x\in\mathcal{D}_P$，其输出具有类型
+\begin{equation}
+  R_{\mathcal{M}}(x):
+  \mathcal{I}_Y(x)\longrightarrow\mathcal{V}_{\mathcal{M}}.
+  \label{eq:opv-reference}
+\end{equation}
+该记号已包含 $b_R$，后文不再重复书写调用映射。
+
+reference 必须在整个契约输入域上有定义，记为
+\begin{equation}
+  \forall x,\quad
+  P(x)\Longrightarrow\operatorname{Def}_R(x).
+  \label{eq:opv-reference-defined}
+\end{equation}
+例如，涉及除法时，应保证参考表达式在允许输入上不存在未定义的除零。
+reference 不受单次 launch 限制；它可以通过数学表达式或具有明确语义的程序给出。
+本章将其作为功能依据，证明候选实现符合该依据。
+reference 是否准确表达开发者期望的算子功能，属于规格本身的正确性问题。
+
+\subsection{候选调用与执行合法性}
+
+候选程序、调用映射 $b_C$ 和语义模型共同确定一次完整调用。
+记 $\mathcal{E}_C(x)$ 为模型允许的完整执行集合。
+该集合必须覆盖模型允许的执行顺序，不能通过预先删除出错执行来定义。
+无法正确构造调用、发生错误或无法完成的行为不能作为成功结果。
+
+记 $\operatorname{Legal}_C(x)$ 为候选调用的执行合法性义务。
+它要求调用可以正确构造，存在模型执行，且模型允许的全部执行均正常完成，
+遵守所选模型的内存与并行执行规则，并满足本章的访问限制。
+这些限制包括：输入保持只读；全局内存读取仅来自声明的输入；写入落在声明的输出存储范围内；
+不存在越界、未定义操作或模型禁止的数据竞争。
+输入、输出的物理表示必须实现约定的逻辑接口，输出存储不得与输入别名。
+仅比较数值相等不能替代这些义务。
+
+\subsection{输出所有权与完整性}
+
+设 $\mathcal{G}(x)$ 为该调用的 program 标识集合。
+对正常执行 $e\in\mathcal{E}_C(x)$，
+记 $W_g(x,e)\subseteq\mathcal{I}_Y(x)$ 为 program $g$ 写入的逻辑输出元素集合。
+通过输出的存储映射，将物理写入对应到逻辑索引；该映射必须保证不同逻辑输出元素具有独立存储。
+
+各 program 的写入集合应构成输出索引集合的一个划分，允许其中的集合为空：
+\begin{align}
+  W_g(x,e)\cap W_h(x,e)&=\varnothing,
+  &&g,h\in\mathcal{G}(x),\ g\ne h,
+  \label{eq:opv-disjoint}\\
+  \bigcup_{g\in\mathcal{G}(x)}W_g(x,e)&=\mathcal{I}_Y(x).
+  \label{eq:opv-coverage}
+\end{align}
+式\eqref{eq:opv-disjoint}规定不同 program 的输出所有权不重叠；
+式\eqref{eq:opv-coverage}规定没有应当产生却被遗漏的输出元素。
+这些条件对所有契约输入和所有模型执行均需成立，统称为 $\operatorname{Partition}_C(x)$。
+若存在非正常执行，则该义务不成立。
+同一 program 内部的写入仍须满足执行合法性；集合记号本身不证明内部不存在竞争。
+
+当上述义务成立时，记 $Y_C(x,e)$ 为完整执行结束后的逻辑输出张量。
+可观察结果是 $\mathcal{I}_Y(x)$ 上所有元素的最终值，
+不包含未被接口声明为结果的局部中间值或存储填充区域。
+对填充区域不作结果比较，并不允许越过声明的合法访问范围。
+
+\section{等价性验证任务}
+\label{sec:opv-problem}
+
+\begin{definition}[验证案例]
+  一个验证案例由共同输入契约 $P$、reference、candidate、
+  双方调用映射、显式语义模型 $\mathcal{M}$，
+  以及固定参数与量化域的声明组成。
+  这些内容共同确定一个待证命题。
+  同一算子可以具有多个案例；改变形状实例化、输入限制或语义模型，可能改变待证命题。
+\end{definition}
+
+\begin{definition}[契约域上的调用等价性]
+  一个案例通过完整验证，当且仅当以下条件全部成立：
+  \begin{enumerate}
+    \item 案例有效：式\eqref{eq:opv-satisfiable}成立。
+    \item reference 在整个契约域上有定义：式\eqref{eq:opv-reference-defined}成立。
+    \item candidate 在整个契约域上满足执行合法性和输出划分义务：
+      \begin{equation}
+        \forall x,\quad P(x)\Longrightarrow
+        \bigl(\operatorname{Legal}_C(x)\land
+        \operatorname{Partition}_C(x)\bigr).
+        \label{eq:opv-candidate-obligations}
+      \end{equation}
+    \item 在上述定义性和合法性得到保证后，所有完整执行的输出与参考输出逐元素相等：
+      \begin{equation}
+        \begin{aligned}
+          \forall x\in\mathcal{D}_P,\quad
+          \forall e\in\mathcal{E}_C(x),\quad
+          \forall i\in\mathcal{I}_Y(x),\qquad\\
+          Y_C(x,e)[i]=R_{\mathcal{M}}(x)[i].
+        \end{aligned}
+        \label{eq:opv-equivalence}
+      \end{equation}
+  \end{enumerate}
+\end{definition}
+
+上述定义将契约有效性、执行合法性与结果等价性分别表述。
+存在非法执行或缺失输出时，不能只比较其余已产生的结果并报告成功。
+本章讨论的是共同契约域上的调用等价性，不对契约外的行为作出保证，
+也不将其直接推广为一般部分程序的等价性或精化关系。
+
+\begin{proposition}[可观察结果的确定性]
+  若案例通过完整验证，则对任意 $x\in\mathcal{D}_P$，
+  candidate 的所有模型执行均产生相同的逻辑输出。
+\end{proposition}
+\begin{proof}
+  由式\eqref{eq:opv-equivalence}，任意两个执行 $e_1,e_2\in\mathcal{E}_C(x)$
+  在每个逻辑输出索引 $i$ 上均等于 $R_{\mathcal{M}}(x)[i]$，
+  故二者的输出逐元素相等。
+\end{proof}
+
+\section{矩阵乘法示例}
+\label{sec:opv-matmul}
+
+在实数模型中，令
+\begin{equation}
+  \symbf{A}\in\mathbb{R}^{M\times K},\qquad
+  \symbf{B}\in\mathbb{R}^{K\times N},\qquad M,N,K>0.
+\end{equation}
+共同输出索引集合为
+\begin{equation}
+  \mathcal{I}_Y(x)=
+  \{(i,j)\mid 0\le i<M,\ 0\le j<N\},
+\end{equation}
+参考函数为
+\begin{equation}
+  R_{\mathcal{M}}(x)[i,j]
+  =\sum_{k=0}^{K-1}A_{ik}B_{kj}.
+  \label{eq:opv-matmul-reference}
+\end{equation}
+
+候选调用采用正整数块大小 $B_M,B_N$，其 grid 为
+\begin{equation}
+  \mathcal{G}(x)=
+  \{0,\dots,\lceil M/B_M\rceil-1\}
+  \times\{0,\dots,\lceil N/B_N\rceil-1\}.
+\end{equation}
+program $(p,q)$ 负责的输出集合为
+\begin{equation}
+  \begin{aligned}
+    W_{p,q}(x)=\{(i,j)\in\mathcal{I}_Y(x)\mid{}&
+      pB_M\le i<(p+1)B_M,\\
+      &qB_N\le j<(q+1)B_N\}.
+  \end{aligned}
+\end{equation}
+这里的集合描述是实现应满足的目标；验证仍须证明实际写入与其一致。
+每个 program 独立完成所负责元素沿 $K$ 维的全部归约。
+由区间划分可检查输出所有权不重叠与覆盖性，
+还需独立检查输入读取和尾块屏蔽是否合法，最后证明输出满足式\eqref{eq:opv-matmul-reference}。
+
+若实现要求 $K\bmod32=0$，则应从共同契约推导该条件，
+或者将其明确加入受限案例。
+固定形状与符号形状案例可采用相同的参考函数，但对应的全称量化范围不同。
+这使验证案例同时表达算子的功能、适用输入域和具体调用方式，而不依赖测试样本来隐式定义命题。
+
+\section{结论的适用范围}
+
+本章定义给出验证工具应当处理的完整数学任务，并不意味着某一实现已经具备全部证明能力。
+求解超时、操作未建模或某项义务尚未完成，均不足以得出完整验证成功。
+实际报告应明确采用的语义模型、契约输入域与已完成的证明义务。
+在该范围内，形式化验证建立模型中的全称结论，
+数值测试则补充检查实际浮点实现的行为；二者共同服务于高性能算子开发中的正确性检查。

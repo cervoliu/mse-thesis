@@ -173,5 +173,9 @@
 }
 \makeatother
 
+% 语义括号 ⟦ ⟧。unicode-math 提供 \lBrack/\rBrack，不提供 stmaryrd 的 \llbracket
+\providecommand{\llbracket}{\lBrack}
+\providecommand{\rrbracket}{\rBrack}
+
 % hyperref 宏包在最后调用
 \usepackage{hyperref}
