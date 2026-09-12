@@ -3,11 +3,20 @@
 ## 日常命令
 
 ```sh
-make          # 编译 thesis.tex，生成 build/thesis.pdf
-make view     # 编译并打开 PDF（macOS）
+make          # 按需编译，生成 build/thesis.pdf；输入未变时跳过
+make view     # 按需编译并打开 PDF（macOS）
+make rebuild  # 强制重新编译（保留辅助文件）
 make clean    # 清理构建文件，保留 PDF
 make cleanall # 清理全部构建文件和 PDF
 ```
+
+## 增量构建
+
+`make` 和编辑器的 `make thesis (Tectonic)` 使用相同的按需构建规则。正文、参考文献、图片、模板或构建脚本发生变化时才重新生成 PDF。构建保留 `build/` 中的 `.aux`、`.toc`、`.bbl` 等辅助文件，并通过现有搜索路径供下一次编译读取。这可以减少目录和交叉引用收敛所需的排版次数。不要在每次编译前运行 `make clean`。
+
+这不是逐页增量排版。修改正文后仍需排版全文，Tectonic 会自动决定重跑次数。首次构建、页码变化或目录变化时可能需要更多遍。当前章节通过 `\input` 引入，不能直接用 `\includeonly` 跳过其他章节。
+
+修改 `TECTONIC_FLAGS`、切换编译器或更新系统字体后，请运行 `make rebuild`。这些环境变化不由文件依赖自动检测。`make rebuild` 仍会复用辅助文件；需要完全清理后构建时，先运行 `make clean`，再运行 `make`。
 
 ## 环境配置
 
@@ -54,4 +63,4 @@ make
 
 首次编译需要联网。Tectonic 会自动下载并缓存宏包和数学字体，并从仓库源码生成模板类文件。成功后得到 `build/thesis.pdf`。请检查 `build/thesis.log` 中的 `Detected fontset`；当前验证环境为 `windows`。同时检查 PDF 中文字体和页面效果。字体缺失时应补齐字体。
 
-缓存齐全后可运行 `make TECTONIC_FLAGS=--only-cached` 验证离线编译。以后新增宏包或字体可能仍需联网。终端只过滤已确认无害的字体路径提示，完整编译输出保存在 `build/tectonic.log`。
+缓存齐全后可运行 `make rebuild TECTONIC_FLAGS=--only-cached` 验证离线编译。以后新增宏包或字体可能仍需联网。终端只过滤已确认无害的字体路径提示，完整编译输出保存在 `build/tectonic.log`。
